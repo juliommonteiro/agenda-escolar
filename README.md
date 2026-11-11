@@ -13,17 +13,25 @@ O projeto foi construído utilizando uma arquitetura moderna dividida entre Fron
 ## ⚙️ Funcionalidades
 
 **Coordenador**
-*   Tudo o que o professor faz com as atividades (aba **Atividades**).
-*   Gerenciar usuários (aba **Usuários**): listar, filtrar por perfil, criar e excluir contas de alunos, professores e coordenadores.
+*   Gerenciar atividades de **todas** as turmas (aba **Atividades**).
+*   Gerenciar turmas (aba **Turmas**): criar, renomear e excluir turmas, definir o professor responsável e escolher os alunos.
+*   Gerenciar usuários (aba **Usuários**): listar, filtrar por perfil, criar (já escolhendo a turma do aluno) e excluir contas.
 *   O coordenador padrão e a própria conta não podem ser excluídos.
 
 **Professor**
-*   Criar, editar (toque no card) e excluir tarefas e eventos escolares.
-*   Filtrar atividades por tipo (Todas / Tarefa / Evento).
-*   Ver quantos alunos já concluíram cada tarefa.
+*   Ver e gerenciar só as atividades das turmas em que leciona.
+*   Criar, editar (toque no card) e excluir tarefas e eventos para as suas turmas.
+*   Filtrar atividades por tipo (Todas / Tarefa / Evento) e por turma.
+*   Ver quantos alunos da turma já concluíram cada tarefa (ex.: "3 de 25").
+
+**Turmas**
+*   Cada turma tem um nome, um professor responsável (opcional) e seus alunos.
+*   Cada aluno pertence a uma turma; ao colocá-lo em outra, ele é transferido.
+*   Toda atividade pertence a uma turma.
+*   Excluir uma turma exclui as atividades dela; os alunos ficam sem turma.
 
 **Aluno**
-*   Ver todas as atividades ordenadas por data, com destaque para tarefas atrasadas.
+*   Ver as atividades da sua turma ordenadas por data, com destaque para tarefas atrasadas.
 *   Marcar tarefas como concluídas — o progresso é **individual** de cada aluno.
 *   Barra de progresso com o total de tarefas concluídas.
 *   Ver os detalhes/descrição de uma atividade (toque no card).
@@ -76,7 +84,8 @@ O endereço da API é escolhido automaticamente:
 | Celular físico           | informe o IP do computador: `flutter run --dart-define=API_URL=http://192.168.0.10:8000` |
 
 ### 3. Acesso inicial
-Ao iniciar pela primeira vez, a API cria uma conta de cada perfil, todas com a senha **`teste`**:
+Ao iniciar pela primeira vez, a API cria uma conta de cada perfil, todas com a senha **`teste`**,
+e uma **Turma Exemplo** com o professor e o aluno abaixo:
 
 | Perfil      | E-mail                    |
 |-------------|---------------------------|
@@ -84,7 +93,10 @@ Ao iniciar pela primeira vez, a API cria uma conta de cada perfil, todas com a s
 | Professor   | `professor@example.com`   |
 | Aluno       | `aluno@example.com`       |
 
-Pelo painel do coordenador (aba **Usuários**) é possível cadastrar novas contas.
+Pelo painel do coordenador é possível cadastrar novas contas (aba **Usuários**) e turmas (aba **Turmas**).
+
+> Bancos criados por versões anteriores são atualizados automaticamente ao iniciar a API (colunas de turma).
+> Atividades antigas ficam "Sem turma" e só aparecem para o coordenador, que pode editá-las e escolher a turma.
 
 > Em produção, defina a variável de ambiente `JWT_SECRET` com uma chave secreta para assinar os tokens.
 
@@ -99,7 +111,7 @@ pytest
 ```
 Backend/
 ├── main.py          # Rotas da API (login, usuários, atividades, conclusões)
-├── models.py        # Tabelas do banco (Usuario, Atividade, Conclusao)
+├── models.py        # Tabelas do banco (Usuario, Turma, Atividade, Conclusao)
 ├── schemas.py       # Validação dos dados de entrada/saída (Pydantic)
 ├── seguranca.py     # Hash de senhas e geração/validação do token JWT
 ├── database.py      # Conexão com o SQLite
@@ -113,8 +125,9 @@ Frontend/lib/
 ├── formatadores.dart         # Formatação de datas
 ├── atividade_repository.dart # Chamadas HTTP de atividades
 ├── usuario_repository.dart   # Chamadas HTTP de login/cadastro
+├── turma_repository.dart     # Chamadas HTTP de turmas
 ├── Screens/                  # Telas (login, painéis, formulários)
-└── widgets/                  # Painéis reutilizáveis (atividades, usuários)
+└── widgets/                  # Painéis reutilizáveis (atividades, turmas, usuários)
 ```
 
 ## 📡 Rotas da API
@@ -129,8 +142,14 @@ No Swagger (`/docs`), faça login em `/login/`, copie o `access_token` e clique 
 | GET    | `/usuarios/`                  | Coordenador              | Lista usuários                             |
 | POST   | `/usuarios/`                  | Coordenador              | Cria usuário                               |
 | DELETE | `/usuarios/{id}`              | Coordenador              | Exclui usuário                             |
-| GET    | `/atividades/`                | Qualquer usuário logado  | Lista atividades (com o progresso do aluno)|
-| POST   | `/atividades/`                | Professor, Coordenador   | Cria atividade                             |
-| PUT    | `/atividades/{id}`            | Professor, Coordenador   | Edita atividade                            |
-| DELETE | `/atividades/{id}`            | Professor, Coordenador   | Exclui atividade                           |
-| PUT    | `/atividades/{id}/conclusao`  | Aluno                    | Marca/desmarca tarefa como concluída       |
+| GET    | `/turmas/`                    | Qualquer usuário logado  | Lista turmas (coord.: todas; prof.: as suas; aluno: a sua) |
+| POST   | `/turmas/`                    | Coordenador              | Cria turma (nome, professor, alunos)       |
+| PUT    | `/turmas/{id}`                | Coordenador              | Edita turma                                |
+| DELETE | `/turmas/{id}`                | Coordenador              | Exclui turma e suas atividades             |
+| GET    | `/atividades/`                | Qualquer usuário logado  | Lista atividades (coord.: todas; prof.: das suas turmas; aluno: da sua turma) |
+| POST   | `/atividades/`                | Professor¹, Coordenador  | Cria atividade                             |
+| PUT    | `/atividades/{id}`            | Professor¹, Coordenador  | Edita atividade                            |
+| DELETE | `/atividades/{id}`            | Professor¹, Coordenador  | Exclui atividade                           |
+| PUT    | `/atividades/{id}/conclusao`  | Aluno²                   | Marca/desmarca tarefa como concluída       |
+
+¹ Somente em turmas em que leciona. ² Somente tarefas da sua turma.

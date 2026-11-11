@@ -217,6 +217,14 @@ class _PainelUsuariosState extends State<PainelUsuarios> {
                 ),
                 child: Text(perfil, style: TextStyle(color: cor, fontSize: 12, fontWeight: FontWeight.bold)),
               ),
+              if (perfil == 'Aluno')
+                Text(
+                  usuario['turma_nome'] == null ? 'Sem turma' : 'Turma: ${usuario['turma_nome']}',
+                  style: TextStyle(
+                    color: usuario['turma_nome'] == null ? Colors.orange[800] : Colors.grey[700],
+                    fontSize: 12,
+                  ),
+                ),
             ],
           ),
         ),

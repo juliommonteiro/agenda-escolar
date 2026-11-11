@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../navegacao.dart';
 import '../widgets/painel_atividades.dart';
+import '../widgets/painel_turmas.dart';
 import '../widgets/painel_usuarios.dart';
 
 class CoordenadorDashboard extends StatefulWidget {
@@ -40,14 +41,13 @@ class _CoordenadorDashboardState extends State<CoordenadorDashboard> {
           ),
         ],
       ),
-      // IndexedStack mantém as duas abas carregadas ao alternar entre elas
-      body: IndexedStack(
-        index: _abaAtual,
-        children: [
-          PainelAtividades(usuario: widget.usuario),
-          const PainelUsuarios(),
-        ],
-      ),
+      // Cada aba é recarregada ao ser aberta, assim mudanças feitas em uma
+      // (ex.: nova turma) já aparecem nas outras
+      body: switch (_abaAtual) {
+        0 => PainelAtividades(usuario: widget.usuario),
+        1 => const PainelTurmas(),
+        _ => const PainelUsuarios(),
+      },
       bottomNavigationBar: NavigationBar(
         selectedIndex: _abaAtual,
         onDestinationSelected: (indice) => setState(() => _abaAtual = indice),
@@ -57,6 +57,11 @@ class _CoordenadorDashboardState extends State<CoordenadorDashboard> {
             icon: Icon(Icons.event_note_outlined),
             selectedIcon: Icon(Icons.event_note_rounded),
             label: 'Atividades',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups_rounded),
+            label: 'Turmas',
           ),
           NavigationDestination(
             icon: Icon(Icons.people_outline),

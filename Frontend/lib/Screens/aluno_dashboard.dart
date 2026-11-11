@@ -3,6 +3,7 @@ import '../atividade_repository.dart';
 import '../formatadores.dart';
 import '../mensagens.dart';
 import '../navegacao.dart';
+import '../turma_repository.dart';
 
 class AlunoDashboard extends StatefulWidget {
   /// Dados do aluno logado: {id, nome, email, perfil}
@@ -16,7 +17,9 @@ class AlunoDashboard extends StatefulWidget {
 
 class _AlunoDashboardState extends State<AlunoDashboard> {
   final AtividadeRepository _repository = AtividadeRepository();
+  final TurmaRepository _turmaRepository = TurmaRepository();
   List<Map<String, dynamic>> _atividades = [];
+  String? _turmaNome; // null = aluno ainda sem turma
   bool _isLoading = true;
 
   @override
@@ -28,10 +31,16 @@ class _AlunoDashboardState extends State<AlunoDashboard> {
   // Função que busca os dados no Python (com o progresso DESTE aluno)
   Future<void> _carregarDados() async {
     try {
-      final dados = await _repository.listarAtividades();
+      // A API devolve só as atividades da turma do aluno
+      final resultados = await Future.wait([
+        _repository.listarAtividades(),
+        _turmaRepository.listarTurmas(),
+      ]);
       if (!mounted) return;
       setState(() {
-        _atividades = dados;
+        _atividades = resultados[0];
+        final turmas = resultados[1];
+        _turmaNome = turmas.isEmpty ? null : turmas.first['nome'] as String?;
         _isLoading = false;
       });
     } catch (e) {
@@ -156,11 +165,18 @@ class _AlunoDashboardState extends State<AlunoDashboard> {
                       padding: const EdgeInsets.only(top: 60),
                       child: Column(
                         children: [
-                          Icon(Icons.celebration_outlined, size: 80, color: Colors.cyan[200]),
+                          Icon(
+                            _turmaNome == null ? Icons.group_off_outlined : Icons.celebration_outlined,
+                            size: 80,
+                            color: Colors.cyan[200],
+                          ),
                           const SizedBox(height: 16),
-                          const Text(
-                            'Nenhuma atividade por enquanto!',
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                          Text(
+                            _turmaNome == null
+                                ? 'Você ainda não está em nenhuma turma.\nFale com a coordenação.'
+                                : 'Nenhuma atividade por enquanto!',
+                            style: const TextStyle(fontSize: 16, color: Colors.grey),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
@@ -194,6 +210,16 @@ class _AlunoDashboardState extends State<AlunoDashboard> {
             'Olá, $nome!',
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
           ),
+          if (_turmaNome != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.groups_outlined, size: 16, color: Colors.cyan[700]),
+                const SizedBox(width: 4),
+                Text(_turmaNome!, style: TextStyle(color: Colors.cyan[700], fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

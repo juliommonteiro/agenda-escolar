@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../mensagens.dart';
+import '../turma_repository.dart';
 import '../usuario_repository.dart';
 
 class NovoUsuarioScreen extends StatefulWidget {
@@ -19,6 +20,24 @@ class _NovoUsuarioScreenState extends State<NovoUsuarioScreen> {
   bool _isLoading = false;
   bool _mostrarSenha = false;
   final UsuarioRepository _repo = UsuarioRepository();
+  final TurmaRepository _turmaRepo = TurmaRepository();
+  List<Map<String, dynamic>> _turmas = [];
+  int? _turmaId; // opcional, só para alunos
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarTurmas();
+  }
+
+  Future<void> _carregarTurmas() async {
+    try {
+      final turmas = await _turmaRepo.listarTurmas();
+      if (mounted) setState(() => _turmas = turmas);
+    } catch (_) {
+      // Sem turmas o cadastro continua funcionando; o aluno pode ser colocado numa turma depois
+    }
+  }
 
   void _salvarUsuario() async {
     if (_formKey.currentState!.validate()) {
@@ -29,6 +48,7 @@ class _NovoUsuarioScreenState extends State<NovoUsuarioScreen> {
           'email': _emailController.text.trim().toLowerCase(),
           'senha': _senhaController.text,
           'perfil': _perfilSelecionado,
+          'turma_id': _perfilSelecionado == 'Aluno' ? _turmaId : null,
         });
 
         if (mounted) {
@@ -113,6 +133,19 @@ class _NovoUsuarioScreenState extends State<NovoUsuarioScreen> {
                 }).toList(),
                 onChanged: (val) => setState(() => _perfilSelecionado = val!),
               ),
+              if (_perfilSelecionado == 'Aluno' && _turmas.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int?>(
+                  initialValue: _turmaId,
+                  decoration: const InputDecoration(labelText: 'Turma (opcional)', border: OutlineInputBorder()),
+                  items: [
+                    const DropdownMenuItem<int?>(value: null, child: Text('Sem turma')),
+                    for (final turma in _turmas)
+                      DropdownMenuItem<int?>(value: turma['id'] as int, child: Text(turma['nome'] as String)),
+                  ],
+                  onChanged: (val) => setState(() => _turmaId = val),
+                ),
+              ],
               const SizedBox(height: 32),
               ElevatedButton(
                 onPressed: _isLoading ? null : _salvarUsuario,

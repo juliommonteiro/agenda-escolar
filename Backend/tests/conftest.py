@@ -22,13 +22,28 @@ EMAILS_INICIAIS = [u["email"] for u in main.USUARIOS_INICIAIS]
 
 @pytest.fixture()
 def client():
-    # Limpa tudo entre os testes, mantendo só as contas iniciais
+    # Limpa tudo entre os testes, mantendo só as contas iniciais e a "Turma Exemplo"
     with SessionLocal() as db:
         db.query(models.Conclusao).delete()
         db.query(models.Atividade).delete()
+        db.query(models.Usuario).update({models.Usuario.turma_id: None})
         db.query(models.Usuario).filter(models.Usuario.email.not_in(EMAILS_INICIAIS)).delete()
+        db.query(models.Turma).filter(models.Turma.nome != main.TURMA_INICIAL).delete()
+        turma = db.query(models.Turma).filter_by(nome=main.TURMA_INICIAL).first()
+        if turma is None:  # algum teste excluiu a turma de exemplo
+            turma = models.Turma(nome=main.TURMA_INICIAL)
+            db.add(turma)
+        turma.professor = db.query(models.Usuario).filter_by(email="professor@example.com").one()
+        turma.alunos = [db.query(models.Usuario).filter_by(email="aluno@example.com").one()]
         db.commit()
     return TestClient(main.app)
+
+
+@pytest.fixture()
+def turma_id(client):
+    """Id da "Turma Exemplo" (professor@example.com + aluno@example.com)."""
+    with SessionLocal() as db:
+        return db.query(models.Turma).filter_by(nome=main.TURMA_INICIAL).one().id
 
 
 def _login(client, email, perfil, senha="teste"):

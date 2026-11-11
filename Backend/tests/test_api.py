@@ -4,11 +4,26 @@ from database import SessionLocal
 TAREFA = {"titulo": "Lista de exercícios", "tipo": "Tarefa", "data": "2026-12-01", "descricao": "Cap. 3"}
 
 
-def criar_usuario(client, coord, email, perfil="Aluno", senha="teste"):
+def criar_usuario(client, coord, email, perfil="Aluno", senha="teste", **extra):
     resp = client.post(
         "/usuarios/", headers=coord,
-        json={"nome": "Fulano", "email": email, "senha": senha, "perfil": perfil},
+        json={"nome": email.split("@")[0], "email": email, "senha": senha, "perfil": perfil, **extra},
     )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def criar_turma(client, coord, nome, professor_id=None, aluno_ids=()):
+    resp = client.post(
+        "/turmas/", headers=coord,
+        json={"nome": nome, "professor_id": professor_id, "aluno_ids": list(aluno_ids)},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def criar_tarefa(client, headers, turma_id, **campos):
+    resp = client.post("/atividades/", headers=headers, json={**TAREFA, "turma_id": turma_id, **campos})
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -24,11 +39,12 @@ def test_contas_iniciais_fazem_login(client, login):
         login(email, perfil)
 
 
-def test_login_retorna_token_e_usuario(client):
+def test_login_retorna_token_e_usuario_com_turma(client):
     resp = client.post("/login/", json={"email": "aluno@example.com", "senha": "teste", "perfil": "Aluno"})
     corpo = resp.json()
     assert corpo["token_type"] == "bearer" and corpo["access_token"]
     assert corpo["usuario"]["perfil"] == "Aluno"
+    assert corpo["usuario"]["turma_nome"] == "Turma Exemplo"
 
 
 def test_login_com_perfil_ou_senha_errados(client):
@@ -39,6 +55,7 @@ def test_login_com_perfil_ou_senha_errados(client):
 def test_rotas_exigem_token(client):
     assert client.get("/atividades/").status_code == 401
     assert client.get("/usuarios/").status_code == 401
+    assert client.get("/turmas/").status_code == 401
     assert client.get("/atividades/", headers={"Authorization": "Bearer token-falso"}).status_code == 401
 
 
@@ -117,72 +134,201 @@ def test_perfil_invalido(client, coord):
     assert resp.status_code == 422
 
 
+def test_criar_aluno_ja_em_uma_turma(client, coord, turma_id):
+    novo = criar_usuario(client, coord, "novato@escola.com", turma_id=turma_id)
+    assert novo["turma_nome"] == "Turma Exemplo"
+    resp = client.post("/usuarios/", headers=coord, json={
+        "nome": "P", "email": "p@escola.com", "senha": "teste", "perfil": "Professor", "turma_id": turma_id,
+    })
+    assert resp.status_code == 400
+
+
+# --- TURMAS ---
+
+def test_coordenador_cria_e_edita_turma(client, coord):
+    prof2 = criar_usuario(client, coord, "prof2@escola.com", "Professor")
+    a1 = criar_usuario(client, coord, "t1@escola.com")
+    a2 = criar_usuario(client, coord, "t2@escola.com")
+
+    turma = criar_turma(client, coord, "3º Ano A", prof2["id"], [a1["id"], a2["id"]])
+    assert turma["professor"]["id"] == prof2["id"]
+    assert {a["id"] for a in turma["alunos"]} == {a1["id"], a2["id"]}
+
+    # Remove um aluno e tira o professor
+    resp = client.put(f"/turmas/{turma['id']}", headers=coord, json={"nome": "3º Ano B", "professor_id": None, "aluno_ids": [a1["id"]]})
+    editada = resp.json()
+    assert editada["nome"] == "3º Ano B" and editada["professor"] is None
+    assert [a["id"] for a in editada["alunos"]] == [a1["id"]]
+    with SessionLocal() as db:
+        assert db.get(models.Usuario, a2["id"]).turma_id is None
+
+
+def test_aluno_transferido_de_turma(client, coord, turma_id):
+    aluno = next(u for u in client.get("/usuarios/", headers=coord).json() if u["email"] == "aluno@example.com")
+    nova = criar_turma(client, coord, "Outra", aluno_ids=[aluno["id"]])
+    assert [a["id"] for a in nova["alunos"]] == [aluno["id"]]
+    exemplo = next(t for t in client.get("/turmas/", headers=coord).json() if t["id"] == turma_id)
+    assert exemplo["alunos"] == []
+
+
+def test_validacoes_de_turma(client, coord):
+    a1 = criar_usuario(client, coord, "v1@escola.com")
+    prof = next(u for u in client.get("/usuarios/", headers=coord).json() if u["perfil"] == "Professor")
+    # Nome repetido (sem diferenciar maiúsculas)
+    assert client.post("/turmas/", headers=coord, json={"nome": "turma exemplo"}).status_code == 400
+    # Aluno como professor e professor como aluno
+    assert client.post("/turmas/", headers=coord, json={"nome": "X", "professor_id": a1["id"]}).status_code == 400
+    assert client.post("/turmas/", headers=coord, json={"nome": "X", "aluno_ids": [prof["id"]]}).status_code == 400
+    assert client.post("/turmas/", headers=coord, json={"nome": "X", "aluno_ids": [9999]}).status_code == 404
+
+
+def test_somente_coordenador_gerencia_turmas(client, prof, aluno, turma_id):
+    for headers in (prof, aluno):
+        assert client.post("/turmas/", headers=headers, json={"nome": "X"}).status_code == 403
+        assert client.put(f"/turmas/{turma_id}", headers=headers, json={"nome": "X"}).status_code == 403
+        assert client.delete(f"/turmas/{turma_id}", headers=headers).status_code == 403
+
+
+def test_cada_perfil_ve_suas_turmas(client, coord, prof, aluno, login):
+    criar_turma(client, coord, "Sem relação")
+    assert len(client.get("/turmas/", headers=coord).json()) == 2
+    assert [t["nome"] for t in client.get("/turmas/", headers=prof).json()] == ["Turma Exemplo"]
+    assert [t["nome"] for t in client.get("/turmas/", headers=aluno).json()] == ["Turma Exemplo"]
+    criar_usuario(client, coord, "semturma@escola.com")
+    assert client.get("/turmas/", headers=login("semturma@escola.com", "Aluno")).json() == []
+
+
+def test_excluir_turma_apaga_atividades_e_libera_alunos(client, coord, prof, turma_id):
+    criar_tarefa(client, prof, turma_id)
+    assert client.delete(f"/turmas/{turma_id}", headers=coord).status_code == 200
+    with SessionLocal() as db:
+        assert db.query(models.Atividade).count() == 0
+        assert db.query(models.Usuario).filter_by(email="aluno@example.com").one().turma_id is None
+
+
+def test_excluir_professor_deixa_turma_sem_professor(client, coord):
+    prof2 = criar_usuario(client, coord, "prof3@escola.com", "Professor")
+    turma = criar_turma(client, coord, "Turma do prof3", prof2["id"])
+    client.delete(f"/usuarios/{prof2['id']}", headers=coord)
+    restante = next(t for t in client.get("/turmas/", headers=coord).json() if t["id"] == turma["id"])
+    assert restante["professor"] is None
+
+
 # --- ATIVIDADES ---
 
-def test_professor_e_coordenador_gerenciam_atividades(client, prof, coord):
+def test_professor_e_coordenador_gerenciam_atividades(client, prof, coord, turma_id):
     for headers in (prof, coord):
-        criada = client.post("/atividades/", headers=headers, json=TAREFA).json()
-        editada = client.put(f"/atividades/{criada['id']}", headers=headers, json={**TAREFA, "titulo": "Novo"}).json()
+        criada = criar_tarefa(client, headers, turma_id)
+        assert criada["turma_nome"] == "Turma Exemplo"
+        editada = client.put(f"/atividades/{criada['id']}", headers=headers, json={**TAREFA, "turma_id": turma_id, "titulo": "Novo"}).json()
         assert editada["titulo"] == "Novo"
         assert client.delete(f"/atividades/{criada['id']}", headers=headers).status_code == 200
     assert client.get("/atividades/", headers=prof).json() == []
 
 
-def test_aluno_nao_gerencia_atividades(client, prof, aluno):
-    criada = client.post("/atividades/", headers=prof, json=TAREFA).json()
-    assert client.post("/atividades/", headers=aluno, json=TAREFA).status_code == 403
-    assert client.put(f"/atividades/{criada['id']}", headers=aluno, json=TAREFA).status_code == 403
+def test_atividade_exige_turma(client, prof, turma_id):
+    assert client.post("/atividades/", headers=prof, json=TAREFA).status_code == 422
+    assert client.post("/atividades/", headers=prof, json={**TAREFA, "turma_id": 9999}).status_code == 404
+
+
+def test_professor_so_gerencia_atividades_das_suas_turmas(client, coord, prof):
+    outro = criar_usuario(client, coord, "outroprof@escola.com", "Professor")
+    turma_alheia = criar_turma(client, coord, "Turma alheia", outro["id"])
+    atividade_alheia = criar_tarefa(client, coord, turma_alheia["id"])
+
+    assert client.post("/atividades/", headers=prof, json={**TAREFA, "turma_id": turma_alheia["id"]}).status_code == 403
+    assert client.put(f"/atividades/{atividade_alheia['id']}", headers=prof, json={**TAREFA, "turma_id": turma_alheia["id"]}).status_code == 403
+    assert client.delete(f"/atividades/{atividade_alheia['id']}", headers=prof).status_code == 403
+    assert client.get("/atividades/", headers=prof).json() == []
+
+
+def test_professor_nao_move_atividade_para_turma_alheia(client, coord, prof, turma_id):
+    turma_alheia = criar_turma(client, coord, "Alheia")
+    minha = criar_tarefa(client, prof, turma_id)
+    resp = client.put(f"/atividades/{minha['id']}", headers=prof, json={**TAREFA, "turma_id": turma_alheia["id"]})
+    assert resp.status_code == 403
+
+
+def test_aluno_ve_so_atividades_da_sua_turma(client, coord, prof, aluno, turma_id):
+    outra = criar_turma(client, coord, "Outra turma")
+    criar_tarefa(client, prof, turma_id, titulo="Minha")
+    criar_tarefa(client, coord, outra["id"], titulo="De outra turma")
+    assert [a["titulo"] for a in client.get("/atividades/", headers=aluno).json()] == ["Minha"]
+    assert len(client.get("/atividades/", headers=coord).json()) == 2
+
+
+def test_aluno_nao_gerencia_atividades(client, prof, aluno, turma_id):
+    criada = criar_tarefa(client, prof, turma_id)
+    corpo = {**TAREFA, "turma_id": turma_id}
+    assert client.post("/atividades/", headers=aluno, json=corpo).status_code == 403
+    assert client.put(f"/atividades/{criada['id']}", headers=aluno, json=corpo).status_code == 403
     assert client.delete(f"/atividades/{criada['id']}", headers=aluno).status_code == 403
-    assert len(client.get("/atividades/", headers=aluno).json()) == 1
 
 
-def test_atividades_ordenadas_por_data(client, prof):
-    client.post("/atividades/", headers=prof, json={**TAREFA, "titulo": "B", "data": "2026-12-20"})
-    client.post("/atividades/", headers=prof, json={**TAREFA, "titulo": "A", "data": "2026-12-05"})
+def test_atividades_ordenadas_por_data(client, prof, turma_id):
+    criar_tarefa(client, prof, turma_id, titulo="B", data="2026-12-20")
+    criar_tarefa(client, prof, turma_id, titulo="A", data="2026-12-05")
     assert [a["titulo"] for a in client.get("/atividades/", headers=prof).json()] == ["A", "B"]
 
 
-def test_dados_invalidos(client, prof):
-    assert client.post("/atividades/", headers=prof, json={**TAREFA, "tipo": "Prova"}).status_code == 422
-    assert client.post("/atividades/", headers=prof, json={**TAREFA, "data": "31/12"}).status_code == 422
-    assert client.post("/atividades/", headers=prof, json={**TAREFA, "titulo": ""}).status_code == 422
+def test_dados_invalidos(client, prof, turma_id):
+    corpo = {**TAREFA, "turma_id": turma_id}
+    assert client.post("/atividades/", headers=prof, json={**corpo, "tipo": "Prova"}).status_code == 422
+    assert client.post("/atividades/", headers=prof, json={**corpo, "data": "31/12"}).status_code == 422
+    assert client.post("/atividades/", headers=prof, json={**corpo, "titulo": ""}).status_code == 422
 
 
 # --- CONCLUSÃO DE TAREFAS (Aluno) ---
 
-def test_conclusao_e_individual_por_aluno(client, prof, coord, aluno, login):
-    criar_usuario(client, coord, "a2@escola.com")
+def test_conclusao_e_individual_e_contada_por_turma(client, prof, coord, aluno, login, turma_id):
+    criar_usuario(client, coord, "a2@escola.com", turma_id=turma_id)
     aluno2 = login("a2@escola.com", "Aluno")
-    tarefa = client.post("/atividades/", headers=prof, json=TAREFA).json()
+    tarefa = criar_tarefa(client, prof, turma_id)
 
     resp = client.put(f"/atividades/{tarefa['id']}/conclusao", headers=aluno, json={"concluida": True})
     assert resp.status_code == 200
 
     assert client.get("/atividades/", headers=aluno).json()[0]["concluida"] is True
     assert client.get("/atividades/", headers=aluno2).json()[0]["concluida"] is False
-    assert client.get("/atividades/", headers=prof).json()[0]["total_concluidas"] == 1
+    visao_prof = client.get("/atividades/", headers=prof).json()[0]
+    assert (visao_prof["total_concluidas"], visao_prof["total_alunos"]) == (1, 2)
 
     client.put(f"/atividades/{tarefa['id']}/conclusao", headers=aluno, json={"concluida": False})
     assert client.get("/atividades/", headers=aluno).json()[0]["concluida"] is False
 
 
-def test_somente_aluno_conclui_tarefa(client, prof, coord):
-    tarefa = client.post("/atividades/", headers=prof, json=TAREFA).json()
+def test_aluno_nao_conclui_tarefa_de_outra_turma(client, coord, aluno):
+    outra = criar_turma(client, coord, "Outra")
+    tarefa = criar_tarefa(client, coord, outra["id"])
+    assert client.put(f"/atividades/{tarefa['id']}/conclusao", headers=aluno, json={"concluida": True}).status_code == 403
+
+
+def test_aluno_transferido_nao_conta_na_turma_antiga(client, coord, prof, aluno, turma_id):
+    tarefa = criar_tarefa(client, prof, turma_id)
+    client.put(f"/atividades/{tarefa['id']}/conclusao", headers=aluno, json={"concluida": True})
+    aluno_id = client.get("/usuarios/me", headers=aluno).json()["id"]
+    criar_turma(client, coord, "Nova", aluno_ids=[aluno_id])
+    visao = client.get("/atividades/", headers=prof).json()[0]
+    assert (visao["total_concluidas"], visao["total_alunos"]) == (0, 0)
+
+
+def test_somente_aluno_conclui_tarefa(client, prof, coord, turma_id):
+    tarefa = criar_tarefa(client, prof, turma_id)
     for headers in (prof, coord):
         assert client.put(f"/atividades/{tarefa['id']}/conclusao", headers=headers, json={"concluida": True}).status_code == 403
 
 
-def test_evento_nao_pode_ser_concluido(client, prof, aluno):
-    evento = client.post("/atividades/", headers=prof, json={**TAREFA, "tipo": "Evento"}).json()
+def test_evento_nao_pode_ser_concluido(client, prof, aluno, turma_id):
+    evento = criar_tarefa(client, prof, turma_id, tipo="Evento")
     resp = client.put(f"/atividades/{evento['id']}/conclusao", headers=aluno, json={"concluida": True})
     assert resp.status_code == 400
 
 
-def test_excluir_aluno_ou_atividade_remove_conclusoes(client, prof, coord, login):
-    novo = criar_usuario(client, coord, "a3@escola.com")
+def test_excluir_aluno_ou_atividade_remove_conclusoes(client, prof, coord, login, turma_id):
+    novo = criar_usuario(client, coord, "a3@escola.com", turma_id=turma_id)
     headers = login("a3@escola.com", "Aluno")
-    t1 = client.post("/atividades/", headers=prof, json=TAREFA).json()
-    t2 = client.post("/atividades/", headers=prof, json=TAREFA).json()
+    t1 = criar_tarefa(client, prof, turma_id)
+    t2 = criar_tarefa(client, prof, turma_id)
     client.put(f"/atividades/{t1['id']}/conclusao", headers=headers, json={"concluida": True})
     client.put(f"/atividades/{t2['id']}/conclusao", headers=headers, json={"concluida": True})
 

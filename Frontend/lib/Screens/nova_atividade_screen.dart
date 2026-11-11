@@ -6,7 +6,10 @@ class NovaAtividadeScreen extends StatefulWidget {
   /// Se informado, a tela abre em modo de edição com os dados preenchidos.
   final Map<String, dynamic>? atividade;
 
-  const NovaAtividadeScreen({super.key, this.atividade});
+  /// Turmas que o usuário pode usar: {id, nome, ...}
+  final List<Map<String, dynamic>> turmas;
+
+  const NovaAtividadeScreen({super.key, this.atividade, required this.turmas});
 
   @override
   State<NovaAtividadeScreen> createState() => _NovaAtividadeScreenState();
@@ -19,6 +22,7 @@ class _NovaAtividadeScreenState extends State<NovaAtividadeScreen> {
 
   String _tipoSelecionado = 'Tarefa';
   DateTime? _dataSelecionada;
+  int? _turmaId;
 
   bool get _isTarefa => _tipoSelecionado == 'Tarefa';
   bool get _isEdicao => widget.atividade != null;
@@ -34,7 +38,13 @@ class _NovaAtividadeScreenState extends State<NovaAtividadeScreen> {
       _descricaoController.text = descricao.startsWith('Nenhuma descrição') ? '' : descricao;
       _tipoSelecionado = atividade['tipo'] == 'Evento' ? 'Evento' : 'Tarefa';
       _dataSelecionada = lerData(atividade['data']);
+      _turmaId = atividade['turma_id'] as int?;
     }
+    final idsDisponiveis = widget.turmas.map((t) => t['id'] as int).toList();
+    // Se só existe uma turma, já vem selecionada
+    if (_turmaId == null && idsDisponiveis.length == 1) _turmaId = idsDisponiveis.first;
+    // A turma precisa estar na lista, senão o campo de seleção dá erro
+    if (_turmaId != null && !idsDisponiveis.contains(_turmaId)) _turmaId = null;
   }
 
   Color get _corPrimaria => _isTarefa ? Colors.cyan : Colors.orange;
@@ -90,7 +100,8 @@ class _NovaAtividadeScreenState extends State<NovaAtividadeScreen> {
       }
 
       // Aqui a chave 'descricao' é criada e enviada junto com os dados!
-      final novaAtividade = {
+      final Map<String, dynamic> novaAtividade = {
+        'turma_id': _turmaId,
         'titulo': _tituloController.text.trim(),
         'tipo': _tipoSelecionado,
         'data': dataParaApi(_dataSelecionada!),
@@ -247,6 +258,24 @@ class _NovaAtividadeScreenState extends State<NovaAtividadeScreen> {
                 ),
               ),
               const SizedBox(height: 32),
+              DropdownButtonFormField<int>(
+                initialValue: _turmaId,
+                decoration: InputDecoration(
+                  labelText: 'Turma',
+                  prefixIcon: Icon(Icons.groups_outlined, color: _corPrimaria),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: _corPrimaria, width: 2),
+                  ),
+                ),
+                items: [
+                  for (final turma in widget.turmas)
+                    DropdownMenuItem(value: turma['id'] as int, child: Text(turma['nome'] as String)),
+                ],
+                onChanged: (valor) => setState(() => _turmaId = valor),
+                validator: (valor) => valor == null ? 'Selecione a turma.' : null,
+              ),
+              const SizedBox(height: 20),
               TextFormField(
                 controller: _tituloController,
                 keyboardType: TextInputType.text,
