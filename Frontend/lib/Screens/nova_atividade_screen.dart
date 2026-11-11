@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../formatadores.dart';
 
 class NovaAtividadeScreen extends StatefulWidget {
-  const NovaAtividadeScreen({super.key});
+  /// Se informado, a tela abre em modo de edição com os dados preenchidos.
+  final Map<String, dynamic>? atividade;
+
+  const NovaAtividadeScreen({super.key, this.atividade});
 
   @override
   State<NovaAtividadeScreen> createState() => _NovaAtividadeScreenState();
@@ -17,16 +21,37 @@ class _NovaAtividadeScreenState extends State<NovaAtividadeScreen> {
   DateTime? _dataSelecionada;
 
   bool get _isTarefa => _tipoSelecionado == 'Tarefa';
+  bool get _isEdicao => widget.atividade != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final atividade = widget.atividade;
+    if (atividade != null) {
+      _tituloController.text = atividade['titulo'] ?? '';
+      final descricao = (atividade['descricao'] ?? '') as String;
+      // Não preenche o campo com o texto padrão "Nenhuma descrição..."
+      _descricaoController.text = descricao.startsWith('Nenhuma descrição') ? '' : descricao;
+      _tipoSelecionado = atividade['tipo'] == 'Evento' ? 'Evento' : 'Tarefa';
+      _dataSelecionada = lerData(atividade['data']);
+    }
+  }
 
   Color get _corPrimaria => _isTarefa ? Colors.cyan : Colors.orange;
   Color get _corGradienteFim => _isTarefa ? Colors.lightBlueAccent : Colors.deepOrangeAccent;
 
   Future<void> _escolherData() async {
+    final agora = DateTime.now();
+    final hoje = DateTime(agora.year, agora.month, agora.day);
+    final dataInicial = _dataSelecionada ?? hoje;
+    // Ao editar uma atividade antiga, permite manter a data que já estava salva
+    final primeiraData = dataInicial.isBefore(hoje) ? dataInicial : hoje;
+
     final DateTime? dataEscolhida = await showDatePicker(
       context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(DateTime.now().year + 1),
+      initialDate: dataInicial,
+      firstDate: primeiraData,
+      lastDate: DateTime(hoje.year + 2, 12, 31),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -68,7 +93,7 @@ class _NovaAtividadeScreenState extends State<NovaAtividadeScreen> {
       final novaAtividade = {
         'titulo': _tituloController.text.trim(),
         'tipo': _tipoSelecionado,
-        'data': DateFormat('dd/MM').format(_dataSelecionada!),
+        'data': dataParaApi(_dataSelecionada!),
         'descricao': _descricaoController.text.trim().isEmpty
             ? 'Nenhuma descrição ou orientação adicional informada.'
             : _descricaoController.text.trim(),
@@ -105,7 +130,9 @@ class _NovaAtividadeScreenState extends State<NovaAtividadeScreen> {
             title: AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),
               child: Text(
-                _isTarefa ? 'Nova Tarefa' : 'Novo Evento Escolar',
+                _isEdicao
+                    ? (_isTarefa ? 'Editar Tarefa' : 'Editar Evento')
+                    : (_isTarefa ? 'Nova Tarefa' : 'Novo Evento Escolar'),
                 key: ValueKey<String>(_tipoSelecionado),
                 style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
               ),
@@ -322,7 +349,9 @@ class _NovaAtividadeScreenState extends State<NovaAtividadeScreen> {
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 200),
                     child: Text(
-                      _isTarefa ? 'SALVAR TAREFA' : 'SALVAR EVENTO',
+                      _isEdicao
+                          ? 'SALVAR ALTERAÇÕES'
+                          : (_isTarefa ? 'SALVAR TAREFA' : 'SALVAR EVENTO'),
                       key: ValueKey<String>(_tipoSelecionado),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),

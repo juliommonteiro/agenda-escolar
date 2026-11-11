@@ -1,6 +1,8 @@
 # Python / FastAPI
 Backend/.venv/
 Backend/__pycache__/
+__pycache__/
+.pytest_cache/
 Backend/*.db
 *.db
 

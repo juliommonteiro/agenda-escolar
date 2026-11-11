@@ -1,32 +1,35 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'api_config.dart';
+import 'sessao.dart';
 
 class UsuarioRepository {
-  static const String baseUrl = 'http://10.0.2.2:8000';
-
+  /// Faz login, guarda o token na [Sessao] e retorna os dados do usuário: {id, nome, email, perfil}
   Future<Map<String, dynamic>> fazerLogin(String email, String senha, String perfil) async {
-    final resposta = await http.post(
-      Uri.parse('$baseUrl/login/'),
-      headers: {'Content-Type': 'application/json; charset=UTF-8'},
-      body: jsonEncode({'email': email, 'senha': senha, 'perfil': perfil}),
-    );
+    Sessao.encerrar(); // garante que não há token antigo
+    final resposta = await ApiConfig.post('/login/', {'email': email, 'senha': senha, 'perfil': perfil});
+    ApiConfig.verificar(resposta, 'E-mail, senha ou perfil incorretos.');
 
-    if (resposta.statusCode == 200) {
-      return jsonDecode(utf8.decode(resposta.bodyBytes));
-    } else {
-      throw Exception('E-mail, senha ou perfil incorretos.');
-    }
+    final dados = ApiConfig.lerJson(resposta) as Map;
+    final usuario = Map<String, dynamic>.from(dados['usuario'] as Map);
+    Sessao.iniciar(dados['access_token'] as String, usuario);
+    return usuario;
+  }
+
+  // --- Somente Coordenador ---
+
+  Future<List<Map<String, dynamic>>> listarUsuarios() async {
+    final resposta = await ApiConfig.get('/usuarios/');
+    ApiConfig.verificar(resposta, 'Falha ao carregar os usuários.');
+    final lista = ApiConfig.lerJson(resposta) as List<dynamic>;
+    return lista.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   Future<void> criarUsuario(Map<String, dynamic> usuario) async {
-    final resposta = await http.post(
-      Uri.parse('$baseUrl/usuarios/'),
-      headers: {'Content-Type': 'application/json; charset=UTF-8'},
-      body: jsonEncode(usuario),
-    );
+    final resposta = await ApiConfig.post('/usuarios/', usuario);
+    ApiConfig.verificar(resposta, 'Não foi possível criar a conta.');
+  }
 
-    if (resposta.statusCode != 200) {
-      throw Exception('Este e-mail já está em uso.');
-    }
+  Future<void> deletarUsuario(int id) async {
+    final resposta = await ApiConfig.delete('/usuarios/$id');
+    ApiConfig.verificar(resposta, 'Não foi possível excluir o usuário.');
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../mensagens.dart';
 import '../usuario_repository.dart';
 
 class NovoUsuarioScreen extends StatefulWidget {
@@ -12,9 +13,11 @@ class _NovoUsuarioScreenState extends State<NovoUsuarioScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nomeController = TextEditingController();
   final _emailController = TextEditingController();
-  final _senhaController = TextEditingController();
+  // Senha padrão já preenchida; o coordenador pode trocar se quiser
+  final _senhaController = TextEditingController(text: 'teste');
   String _perfilSelecionado = 'Aluno';
   bool _isLoading = false;
+  bool _mostrarSenha = false;
   final UsuarioRepository _repo = UsuarioRepository();
 
   void _salvarUsuario() async {
@@ -22,27 +25,31 @@ class _NovoUsuarioScreenState extends State<NovoUsuarioScreen> {
       setState(() => _isLoading = true);
       try {
         await _repo.criarUsuario({
-          'nome': _nomeController.text,
-          'email': _emailController.text,
+          'nome': _nomeController.text.trim(),
+          'email': _emailController.text.trim().toLowerCase(),
           'senha': _senhaController.text,
           'perfil': _perfilSelecionado,
         });
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Conta criada com sucesso!'), backgroundColor: Colors.green),
-          );
-          Navigator.pop(context); // Volta pro dashboard
+          mostrarMensagem(context, 'Conta criada com sucesso!');
+          Navigator.pop(context, true); // Volta pro painel e avisa que precisa recarregar
         }
       } catch (e) {
-        setState(() => _isLoading = false);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString().replaceAll('Exception: ', '')), backgroundColor: Colors.red),
-          );
+          setState(() => _isLoading = false);
+          mostrarErro(context, e);
         }
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _nomeController.dispose();
+    _emailController.dispose();
+    _senhaController.dispose();
+    super.dispose();
   }
 
   @override
@@ -63,27 +70,45 @@ class _NovoUsuarioScreenState extends State<NovoUsuarioScreen> {
               TextFormField(
                 controller: _nomeController,
                 decoration: const InputDecoration(labelText: 'Nome Completo', border: OutlineInputBorder()),
-                validator: (val) => val!.isEmpty ? 'Informe o nome' : null,
+                validator: (val) => (val == null || val.trim().isEmpty) ? 'Informe o nome' : null,
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(labelText: 'E-mail', border: OutlineInputBorder()),
-                validator: (val) => val!.isEmpty ? 'Informe o e-mail' : null,
+                validator: (val) {
+                  final email = val?.trim() ?? '';
+                  if (email.isEmpty) return 'Informe o e-mail';
+                  if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) return 'E-mail inválido';
+                  return null;
+                },
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _senhaController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Senha (Provisória)', border: OutlineInputBorder()),
-                validator: (val) => val!.isEmpty ? 'Crie uma senha' : null,
+                obscureText: !_mostrarSenha,
+                decoration: InputDecoration(
+                  labelText: 'Senha (Provisória)',
+                  helperText: 'Senha padrão: "teste". Pode ser alterada.',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(_mostrarSenha ? Icons.visibility_off : Icons.visibility),
+                    tooltip: _mostrarSenha ? 'Ocultar senha' : 'Mostrar senha',
+                    onPressed: () => setState(() => _mostrarSenha = !_mostrarSenha),
+                  ),
+                ),
+                validator: (val) {
+                  if (val == null || val.isEmpty) return 'Crie uma senha';
+                  if (val.length < 3) return 'A senha precisa ter pelo menos 3 caracteres';
+                  return null;
+                },
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _perfilSelecionado,
+                initialValue: _perfilSelecionado,
                 decoration: const InputDecoration(labelText: 'Tipo de Conta', border: OutlineInputBorder()),
-                items: ['Aluno', 'Professor'].map((perfil) {
+                items: ['Aluno', 'Professor', 'Coordenador'].map((perfil) {
                   return DropdownMenuItem(value: perfil, child: Text(perfil));
                 }).toList(),
                 onChanged: (val) => setState(() => _perfilSelecionado = val!),
@@ -96,7 +121,11 @@ class _NovoUsuarioScreenState extends State<NovoUsuarioScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
                 child: _isLoading 
-                    ? const CircularProgressIndicator(color: Colors.white)
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                      )
                     : const Text('CRIAR CONTA', style: TextStyle(color: Colors.white, fontSize: 16)),
               ),
             ],

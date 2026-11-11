@@ -1,9 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart'; // <-- 1. Import de Idiomas
 import 'Screens/login_screen.dart';
+import 'api_config.dart';
 
+final _navigatorKey = GlobalKey<NavigatorState>();
+final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
 void main() {
+  // Se o token expirar em qualquer tela, volta para o login com um aviso
+  ApiConfig.aoExpirarSessao = () {
+    _navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
+    _messengerKey.currentState?.showSnackBar(
+      const SnackBar(
+        content: Text('Sua sessão expirou. Faça login novamente.'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  };
+
   runApp(const AgendaEscolarApp());
 }
 
@@ -15,6 +32,8 @@ class AgendaEscolarApp extends StatelessWidget {
     return MaterialApp(
       title: 'Agenda Escolar',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _messengerKey,
       
       // --- 2. Configuração do Calendário e Idioma para o Brasil ---
       localizationsDelegates: const [
